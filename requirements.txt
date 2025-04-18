@@ -1,0 +1,5 @@
+PyAutoGUI~=0.9.54
+darkdetect~=0.8.0
+pynput~=1.8.1
+pillow~=11.2.1
+pystray~=0.19.5
