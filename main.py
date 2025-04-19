@@ -14,6 +14,8 @@ import idlelib.percolator as idp
 import pystray
 from pystray import MenuItem as item
 import locale
+import re
+from urllib.parse import urlparse, urlunparse
 
 # --- Language Strings ---
 LANGUAGES = {
@@ -67,6 +69,22 @@ LANGUAGES = {
         'destroy_root_error': "Error destroying Tkinter root: {e}",
         'main_error': "Critical error during application startup or runtime: {main_e}",
         'exit_message': "Application exited.",
+        'help_text_title': 'Clipboard Helper - Usage',
+        'help_text_content': """Button Functions:
+💾 Copy edited text to clipboard
+🎨 Show syntax highlighting
+🔢 Show line numbers
+📍 Pin window (stays open)
+❌ Close window
+
+Hotkey: Ctrl+Shift+Z
+ - If window open: Process text (e.g., remove URL params). 
+ - If window closed: Show current clipboard; If clipboard is empty: Show this help. 
+ 
+Hotkey: Ctrl+Enter
+- When editing in text block, save the content to system clipboard immediately
+
+Author: Foxerine (GitHub)""",
     },
     'zh': {
         'copy_button_text': '💾',
@@ -118,6 +136,22 @@ LANGUAGES = {
         'destroy_root_error': "销毁 Tkinter 根窗口时出错: {e}",
         'main_error': "应用程序启动或运行时发生严重错误: {main_e}",
         'exit_message': "应用程序已退出。",
+        'help_text_title': '剪贴板助手 - 用法',
+        'help_text_content': """按钮功能:
+💾 保存内容到系统剪贴板
+🎨 切换语法高亮
+🔢 切换显示行号
+📍 固定窗口 (保持打开) 
+❌ 关闭窗口
+
+快捷键: Ctrl+Shift+Z
+ - 如果窗口已开启: 对文本框中的文字进行快速处理 (如去掉所有的URL参数)。 
+ - 如果窗口未开启: 显示剪贴板内容； 如果剪贴板为空: 显示这个帮助信息。 
+ 
+热键: Ctrl+Enter
+- 当在文本框内编辑时，立即保存内容到系统剪贴板
+
+作者: 沙糖橘(Foxerine at GitHub)""",
     }
 }
 # --- End Language Strings ---
@@ -377,6 +411,7 @@ class PopupWindow:
         if sys.platform.startswith('linux'):
             self.content_text.bind("<Button-4>", self.on_mousewheel)
             self.content_text.bind("<Button-5>", self.on_mousewheel)
+        self.content_text.bind("<B1-Motion>", self._on_content_drag_scroll, add='+')
 
     def create_context_menu(self):
         self.context_menu = tk.Menu(
@@ -561,6 +596,18 @@ class PopupWindow:
         self.content_text.bind("<<YviewChanged>>", lambda e: self.update_line_numbers(), add='+')
         self.update_line_numbers()
 
+    def _on_content_drag_scroll(self, event):
+        """Updates line numbers during text selection drag autoscroll."""
+        # Check if line numbers are visible and if text is actually selected
+        if self.show_line_numbers and self.content_text.tag_ranges("sel"):
+            # Check if mouse is near top/bottom edge to guess autoscroll
+            widget_height = self.content_text.winfo_height()
+            y_pos = event.y # Y position relative to the text widget
+            scroll_trigger_margin = 15 # Pixels from edge
+
+            if y_pos < scroll_trigger_margin or y_pos > widget_height - scroll_trigger_margin:
+                # Schedule update slightly deferred for robustness
+                self.window.after(0, self.update_line_numbers)
 
     def hide_line_number_area(self):
         if hasattr(self, 'line_numbers') and self.line_numbers and self.line_numbers.winfo_exists():
@@ -698,8 +745,7 @@ class PopupWindow:
                 scroll_units = -3 if event.num == 4 else 3
             self.content_text.yview_scroll(scroll_units, "units")
             if self.show_line_numbers and hasattr(self, 'line_numbers') and self.line_numbers.winfo_exists():
-                # No need to call update_line_numbers directly, <<YviewChanged>> binding handles it
-                pass
+                self.window.after(0, self.update_line_numbers)
             return "break"
         except Exception as e:
             print(self.lang_strings['mousewheel_error'].format(e=e))
@@ -709,7 +755,7 @@ class PopupWindow:
         try:
             # Call the original yview method on the Text widget
             self.content_text.yview(*args)
-            # The <<YviewChanged>> binding will automatically call update_line_numbers
+            self.window.after(0, self.update_line_numbers)
         except Exception as e:
             print(self.lang_strings['scroll_update_error'].format(e=e))
 
@@ -886,6 +932,170 @@ class PopupWindow:
             print(self.lang_strings['close_window_error'].format(e=e))
             self.app.popup_closed() # Ensure app knows it's closed
 
+class TextProcessor:
+    """
+    Handles hotkey actions and text transformations for the clipboard app.
+    Determines if the popup text needs transformation (like URL cleaning)
+    or if help text should be displayed (if the popup is empty).
+    """
+
+    def __init__(self, app):
+        """
+        Initialize the TextProcessor.
+
+        Args:
+            app: The main ClipboardApp instance.
+        """
+        self.app = app # Store reference to the main app
+
+    # --- Internal Helper Functions for Transformations / Actions ---
+
+    def _get_help_text(self) -> tuple[str, str, str]:
+        """
+        Retrieves the help content and title.
+
+        Returns:
+            A tuple: (help_content, help_title, action_flag)
+            action_flag is 'show_help', indicating no clipboard update needed.
+        """
+        help_content = self.app.lang_strings['help_text_content']
+        help_title = self.app.lang_strings['help_text_title']
+        # Flag indicates this was specifically the help action
+        return help_content, help_title, 'show_help'
+
+    def _clean_url_query(self, text: str) -> tuple[str, str | None, str | None]:
+        """
+        Internal helper: Finds the first URL and removes its query if present.
+        Assumes the check for query presence might have already happened.
+
+        Returns:
+            A tuple: (potentially_modified_text, new_title (None), action_flag)
+            action_flag is 'do_copy_to_clipboard' if modified, None otherwise.
+        """
+        try:
+            url_match = re.search(r'https?://[^\s<>"]+', text) # Slightly improved regex
+            if url_match:
+                url_str = url_match.group(0)
+                parsed = urlparse(url_str)
+                # Double check scheme, netloc, and query for safety
+                if parsed.scheme in ('http', 'https') and parsed.netloc and parsed.query:
+                    cleaned_url_str = urlunparse(parsed._replace(query='', fragment=''))
+                    modified_text = text.replace(url_str, cleaned_url_str, 1)
+                    # Return cleaned text, no title change needed, flag to copy
+                    return modified_text, None, 'do_copy_to_clipboard'
+        except Exception:
+            pass # Ignore parsing errors
+        # Return original text, no title change, no action flag if failed
+        return text, None, None
+
+    # --- Add other specific transformation functions here following the pattern ---
+    # Example:
+    # def _condense_whitespace(self, text: str) -> tuple[str, str | None, str | None]:
+    #     """ Replaces multiple whitespace characters with a single space, trims edges. """
+    #     cleaned_text = re.sub(r'\s+', ' ', text).strip()
+    #     if cleaned_text != text:
+    #         return cleaned_text, None, 'do_copy_to_clipboard'
+    #     else:
+    #         return text, None, None
+
+    # --- Central Decision Function ---
+
+    def transform_text(self, original_text: str) -> tuple[str, str | None, str | None]:
+        """
+        Checks conditions and returns the result of ONE applicable transformation
+        (or the help text action).
+
+        Returns:
+            A tuple: (new_text_content, new_title, action_flag)
+            action_flag can be 'show_help', 'do_copy_to_clipboard', or None.
+            new_title is only relevant if action_flag is 'show_help'.
+        """
+        # --- Case 0: Empty or Whitespace Text -> Show Help ---
+        if not original_text or not original_text.strip():
+            # Condition met: Return the result of the help text function
+            return self._get_help_text() # Returns (content, title, 'show_help')
+
+        # --- Case 1: URL with Query Parameters -> Clean URL ---
+        try:
+            url_match = re.search(r'https?://[^\s<>"]+', original_text)
+            if url_match:
+                url_str = url_match.group(0)
+                parsed = urlparse(url_str)
+                # Check if it's a valid web URL *and* has query parameters
+                if parsed.scheme in ('http', 'https') and parsed.netloc and parsed.query:
+                    # Condition met, call the specific cleaning function
+                    return self._clean_url_query(original_text) # Returns (text, None, flag)
+        except Exception:
+            pass # Ignore parsing errors during check
+
+        # --- Case 2: Condense Whitespace (Example - add elif if needed) ---
+        # elif re.search(r'\s{2,}', original_text) or original_text != original_text.strip():
+        #     return self._condense_whitespace(original_text) # Define _condense_whitespace if used
+
+        # --- Add other cases (elif conditions calling their specific helpers) here ---
+
+
+        # --- Default: No transformation applied ---
+        # Return original text, no specific title change, no action flag
+        return original_text, None, None
+
+    # --- Hotkey Action Handlers ---
+
+    def process_existing_popup_text(self):
+        """Gets text from existing popup, determines transformation/help, updates UI & clipboard."""
+        if not self.app.popup or not hasattr(self.app.popup, 'window') or not self.app.popup.window.winfo_exists():
+            return # Safety check
+
+        try:
+            current_text = self.app.popup.content_text.get("1.0", "end-1c")
+
+            # Determine required action and get resulting content/title/flag
+            new_text_content, new_title, action_flag = self.transform_text(current_text)
+
+            # Update popup only if content or title actually changes or if showing help
+            # (Avoids flicker if no transformation occurred)
+            original_title_text = self.app.popup.title_label.cget('text') # Get current title
+            should_update_popup = (new_text_content != current_text or
+                                   (action_flag == 'show_help' and new_title != original_title_text))
+
+            if should_update_popup:
+                # Preserve selection/view before updating
+                selection = self.app.popup.content_text.tag_ranges("sel")
+                current_view = self.app.popup.content_text.yview()
+
+                # Use new_title only if showing help, otherwise keep existing title
+                title_to_set = new_title if action_flag == 'show_help' else None
+                self.app.popup.update_content(new_text_content, title=title_to_set)
+
+                # Restore selection/view if possible
+                try:
+                    if selection:
+                        self.app.popup.content_text.tag_add("sel", selection[0], selection[1])
+                    self.app.popup.content_text.yview_moveto(current_view[0])
+                except tk.TclError: pass # Ignore errors if indices/view invalid
+
+            # Update clipboard *only* if the flag indicates it (e.g., URL cleaned)
+            if action_flag == 'do_copy_to_clipboard':
+                self.app.root.clipboard_clear()
+                self.app.root.clipboard_append(new_text_content)
+                self.app.previous_clipboard = new_text_content # Update internal state
+
+        except tk.TclError:
+            pass # Ignore errors if text widget is inaccessible during get/update
+        except Exception as e:
+            print(self.app.lang_strings['process_error'].format(e=e))
+
+    def handle_hotkey_action(self):
+        """
+        Main entry point called on hotkey press.
+        Decides whether to process existing popup or show clipboard/help.
+        """
+        if self.app.popup and hasattr(self.app.popup, 'window') and self.app.popup.window.winfo_exists():
+            # Popup exists: Process its content (which now handles empty/help case internally)
+            self.app.root.after(0, self.process_existing_popup_text)
+        else:
+            # Popup doesn't exist: Show current clipboard or help text in a new popup
+            self.app.root.after(0, self.app._show_clipboard_or_help)
 
 class ClipboardApp:
     """剪贴板监控应用的主类"""
@@ -921,6 +1131,8 @@ class ClipboardApp:
         self.is_syntax_highlight_globally = False
         # --- End Global State ---
 
+        self.text_processor = TextProcessor(self)
+
         self.setup_tray_icon() # Needs lang_strings
         self.root = tk.Tk()
         self.root.withdraw()
@@ -938,7 +1150,6 @@ class ClipboardApp:
     def set_syntax_highlight_enabled(self, state: bool):
         self.is_syntax_highlight_globally = state
     # --- End Global State Setters ---
-
 
     def _is_modifier(self, key):
         return key in {
@@ -978,9 +1189,7 @@ class ClipboardApp:
                 # Trigger ONLY if BOTH modifiers are held
                 if ctrl_pressed and shift_pressed:
                     hotkey_triggered_show = True
-                    # Schedule clipboard content display on the main thread
-                    self.root.after(0, self._show_clipboard_content)
-
+                    self.text_processor.handle_hotkey_action()
             # --- END: Hotkey Detection ---
 
         except AttributeError:
@@ -1332,6 +1541,6 @@ if __name__ == "__main__":
             print(final_lang_strings['exit_message'])
 
 # Compile:
-# python -m nuitka --standalone --mingw64 --windows-console-mode=disable --enable-plugin=tk-inter --plugin-enable=anti-bloat --nofollow-import-to=numpy,pandas,matplotlib,scipy,PyQt5,PySide2,email,http,ssl,urllib,html,xml,test,unittest,tkinter.test,idlelib.idle_test --include-package=pynput,pyautogui,darkdetect,pystray --include-module=idlelib.colorizer,idlelib.percolator --include-data-dir=assets=assets --python-flag=-OO --remove-output --lto=yes --onefile ./main.py
+# python -m nuitka --standalone --mingw64 --windows-console-mode=disable --enable-plugin=tk-inter --plugin-enable=anti-bloat --nofollow-import-to=numpy,pandas,matplotlib,scipy,PyQt5,PySide2,email,http,ssl,html,xml,test,unittest,tkinter.test,idlelib.idle_test --include-package=pynput,pyautogui,darkdetect,pystray --include-module=idlelib.colorizer,idlelib.percolator --include-data-dir=assets=assets --python-flag=-OO --remove-output --lto=yes --onefile ./main.py
 
 # tips: 结合 Win + V 使用，效果更佳

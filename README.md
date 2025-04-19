@@ -71,7 +71,7 @@ python main.py
 ### 从源码编译
 
 ```bash
-python -m nuitka --standalone --mingw64 --windows-console-mode=disable --enable-plugin=tk-inter --plugin-enable=anti-bloat --nofollow-import-to=numpy,pandas,matplotlib,scipy,PyQt5,PySide2,email,http,ssl,urllib,html,xml,test,unittest,tkinter.test,idlelib.idle_test --include-package=pynput,pyautogui,darkdetect,pystray --include-module=idlelib.colorizer,idlelib.percolator --include-data-dir=assets=assets --python-flag=-OO --remove-output --lto=yes --onefile ./main.py
+python -m nuitka --standalone --mingw64 --windows-console-mode=disable --enable-plugin=tk-inter --plugin-enable=anti-bloat --nofollow-import-to=numpy,pandas,matplotlib,scipy,PyQt5,PySide2,email,http,ssl,html,xml,test,unittest,tkinter.test,idlelib.idle_test --include-package=pynput,pyautogui,darkdetect,pystray --include-module=idlelib.colorizer,idlelib.percolator --include-data-dir=assets=assets --python-flag=-OO --remove-output --lto=yes --onefile ./main.py
 ```
 
 ## 🔧 系统要求
