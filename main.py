@@ -1,9 +1,12 @@
+import ctypes
 import threading
 import time
 import os
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
+from tkinter import messagebox
+
 import pyautogui
 from pynput import keyboard, mouse
 import darkdetect
@@ -17,144 +20,7 @@ import locale
 import re
 from urllib.parse import urlparse, urlunparse
 
-# --- Language Strings ---
-LANGUAGES = {
-    'en': {
-        'copy_button_text': '💾',
-        'highlight_button_text': '🎨',
-        'linenum_button_text': '🔢',
-        'pin_button_text_pinned': '📍',
-        'pin_button_text_unpinned': '📌',
-        'close_button_text': '❌',
-        'context_copy_selected': 'Copy Selected',
-        'context_update_clipboard': 'Update Clipboard',
-        'context_select_all': 'Select All',
-        'context_close_window': 'Close Window',
-        'title_copied_text': 'Copied Text',
-        'title_copied_text_lines': 'Copied Text ({lines} lines)',
-        'title_file_path': 'File Path: {filename}',
-        'title_copied_files_single': 'Copied File: {filename}',
-        'title_copied_files_multi': 'Copied {count} Files/Folders',
-        'title_copied_image': 'Copied Image: {width}x{height} Pixels',
-        'status_copied': ' - Copied!',
-        'status_updated': ' - Updated!',
-        'tray_tooltip': 'Clipboard Helper',
-        'tray_exit': 'Exit',
-        'clipboard_content_title': 'Clipboard Content',
-        'font_error': "Failed to load preferred font: {e}, using system default (ugly)",
-        'monitor_error': "Error getting monitor info: {e}",
-        'pynput_error': "!! Error setting up pynput listeners (permissions may be needed): {e}",
-        'clipboard_monitor_error': "Failed to set up clipboard monitor: {e}",
-        'popup_error': "Error showing/updating popup: {e}",
-        'update_content_error': "Error updating window content: {e}",
-        'copy_text_error': "Error copying text: {e}",
-        'select_all_error': "Error selecting all text: {e}",
-        'copy_edited_error': "Error copying edited text: {e}",
-        'update_lines_error': "Error updating line numbers: {e}",
-        'apply_highlight_error': "Error applying syntax highlight: {e}",
-        'remove_highlight_error': "Error removing syntax highlight: {e}",
-        'mousewheel_error': "Error handling scroll wheel event: {e}",
-        'scroll_update_error': "Error updating scroll: {e}",
-        'close_window_error': "Error closing window: {e}",
-        'key_press_error': "Error processing key press: {e}",
-        'clipboard_show_error': "Error getting or showing clipboard content: {e}",
-        'tray_setup_error': "Failed to set up system tray icon: {e}",
-        'tray_load_error': "Pystray or PIL not loaded correctly. Cannot create tray icon.",
-        'tray_image_missing': "Tray icon image not found at {path}, skipping tray setup.",
-        'stop_keyboard_listener_error': "Error stopping keyboard listener: {e}",
-        'stop_mouse_listener_error': "Error stopping mouse listener: {e}",
-        'stop_tray_error': "Error stopping tray icon: {e}",
-        'close_popup_on_exit_error': "Error closing popup during exit: {e}",
-        'destroy_root_tcl_error': "TclError destroying root (might already be gone): {e}",
-        'destroy_root_error': "Error destroying Tkinter root: {e}",
-        'main_error': "Critical error during application startup or runtime: {main_e}",
-        'exit_message': "Application exited.",
-        'help_text_title': 'Clipboard Helper - Usage',
-        'help_text_content': """Button Functions:
-💾 Copy edited text to clipboard
-🎨 Show syntax highlighting
-🔢 Show line numbers
-📍 Pin window (stays open)
-❌ Close window
-
-Hotkey: Ctrl+Shift+Z
- - If window open: Process text (e.g., remove URL params). 
- - If window closed: Show current clipboard; If clipboard is empty: Show this help. 
- 
-Hotkey: Ctrl+Enter
-- When editing in text block, save the content to system clipboard immediately
-
-Author: Foxerine (GitHub)""",
-    },
-    'zh': {
-        'copy_button_text': '💾',
-        'highlight_button_text': '🎨',
-        'linenum_button_text': '🔢',
-        'pin_button_text_pinned': '📍',
-        'pin_button_text_unpinned': '📌',
-        'close_button_text': '❌',
-        'context_copy_selected': '复制选中',
-        'context_update_clipboard': '更新剪贴板',
-        'context_select_all': '全选',
-        'context_close_window': '关闭窗口',
-        'title_copied_text': '复制的文本',
-        'title_copied_text_lines': '复制的文本 ({lines} 行)',
-        'title_file_path': '文件路径: {filename}',
-        'title_copied_files_single': '复制的文件: {filename}',
-        'title_copied_files_multi': '复制了 {count} 个文件/夹',
-        'title_copied_image': '复制的图片: {width}x{height} 像素',
-        'status_copied': ' - 已复制!',
-        'status_updated': ' - 已更新!',
-        'tray_tooltip': '剪贴板助手',
-        'tray_exit': '退出',
-        'clipboard_content_title': '剪贴板内容',
-        'font_error': "无法载入首选字体: {e}，使用系统默认字体（很丑）",
-        'monitor_error': "获取显示器信息出错: {e}",
-        'pynput_error': "!! 设置 pynput 事件监听器出错 (可能需要权限): {e}",
-        'clipboard_monitor_error': "设置剪贴板监听器失败: {e}",
-        'popup_error': "显示或更新弹窗时出错: {e}",
-        'update_content_error': "更新窗口内容出错: {e}",
-        'copy_text_error': "复制文本出错: {e}",
-        'select_all_error': "全选文本出错: {e}",
-        'copy_edited_error': "复制编辑后文本出错: {e}",
-        'update_lines_error': "更新行号时出错: {e}",
-        'apply_highlight_error': "应用语法高亮出错: {e}",
-        'remove_highlight_error': "移除语法高亮出错: {e}",
-        'mousewheel_error': "滚轮事件处理出错: {e}",
-        'scroll_update_error': "滚动更新出错: {e}",
-        'close_window_error': "关闭窗口时出错: {e}",
-        'key_press_error': "处理按键事件时出错: {e}",
-        'clipboard_show_error': "获取或显示剪贴板内容出错: {e}",
-        'tray_setup_error': "设置系统托盘图标失败: {e}",
-        'tray_load_error': "Pystray 或 PIL 未正确加载。无法创建托盘图标。",
-        'tray_image_missing': "在 {path} 未找到托盘图标图像，跳过托盘设置。",
-        'stop_keyboard_listener_error': "停止键盘监听器时出错: {e}",
-        'stop_mouse_listener_error': "停止鼠标监听器时出错: {e}",
-        'stop_tray_error': "停止托盘图标时出错: {e}",
-        'close_popup_on_exit_error': "退出时关闭弹窗出错: {e}",
-        'destroy_root_tcl_error': "销毁根窗口时 TclError (可能已消失): {e}",
-        'destroy_root_error': "销毁 Tkinter 根窗口时出错: {e}",
-        'main_error': "应用程序启动或运行时发生严重错误: {main_e}",
-        'exit_message': "应用程序已退出。",
-        'help_text_title': '剪贴板助手 - 用法',
-        'help_text_content': """按钮功能:
-💾 保存内容到系统剪贴板
-🎨 切换语法高亮
-🔢 切换显示行号
-📍 固定窗口 (保持打开) 
-❌ 关闭窗口
-
-快捷键: Ctrl+Shift+Z
- - 如果窗口已开启: 对文本框中的文字进行快速处理 (如去掉所有的URL参数)。 
- - 如果窗口未开启: 显示剪贴板内容； 如果剪贴板为空: 显示这个帮助信息。 
- 
-热键: Ctrl+Enter
-- 当在文本框内编辑时，立即保存内容到系统剪贴板
-
-作者: 沙糖橘(Foxerine at GitHub)""",
-    }
-}
-# --- End Language Strings ---
+from i18n import LANGUAGES
 
 class ThemeManager:
     """管理应用程序的主题和字体"""
@@ -286,6 +152,8 @@ class PopupWindow:
         self.is_dragging = False
         self.resize_edge = None
         self.is_resizing = False
+        self._last_cleared_text = None
+        self._is_programmatic_clear = False
         # Initialize state from app
         self.show_line_numbers = show_line_numbers_init
         self.is_syntax_highlight = is_syntax_highlight_init
@@ -398,16 +266,74 @@ class PopupWindow:
             self.reset_close_timer()
         return None
 
+    def _schedule_invalidate_undo(self):
+        """Helper function called by 'after' to invalidate the undo state."""
+        # Check again in case undo was already performed in the same event cycle
+        if self._last_cleared_text is not None:
+            # print("Executing scheduled invalidation.") # Debug
+            self._last_cleared_text = None
+
+    def invalidate_clear_undo_on_input(self, event=None):
+        """
+        Called on KeyPress or Paste. Invalidates the specific 'clear undo'
+        state if it's active AND the event represents actual text input
+        (not just modifiers or the specific undo/clear keys themselves).
+        Uses after(0) to delay invalidation, allowing combo bindings to act first.
+        """
+        # Ignore if undo state isn't active or if it's the programmatic clear
+        if self._last_cleared_text is None or self._is_programmatic_clear:
+            return None # Let event proceed
+
+        # Define keys that should definitely trigger invalidation
+        input_keysyms = {'BackSpace', 'Delete', 'Return', 'Tab', 'space', 'Escape'} # Add other editing keys if needed
+
+        # Check if the key press is likely actual input
+        is_input_event = False
+        if event:
+            # Check for printable characters (most reliable for letters, numbers, symbols)
+            # Ignore None or empty chars which can happen for modifiers/special keys
+            if event.char and event.char.isprintable():
+                is_input_event = True
+            # Check for specific editing keysyms
+            elif event.keysym in input_keysyms:
+                is_input_event = True
+            # Heuristic: If keysym suggests a character key but char is None (e.g., numpad)
+            elif len(event.keysym) == 1 and event.keysym.isalnum():
+                is_input_event = True
+
+        # Also consider Paste as an input event
+        elif event is None: # Assume called by <<Paste>> if event is None (or check widget name if needed)
+            is_input_event = True
+
+        # If it was an input event, schedule the invalidation
+        if is_input_event:
+            # Use after(0) to run this *after* the current event finishes processing.
+            # This allows <Control-z> to consume _last_cleared_text before it's nullified.
+            # print(f"Scheduling invalidation for event: char='{event.char if event else 'Paste'}', keysym='{event.keysym if event else 'Paste'}'") # Debug
+            self.window.after(0, self._schedule_invalidate_undo)
+
+        # Let the original event proceed (e.g., allow typing the character)
+        return None
+
     def bind_content_events(self):
         self.create_context_menu()
+        self.content_text.bind("<Control-z>", self.undo_clear)
         self.content_text.bind("<Control-Return>", lambda e: self.copy_edited_text())
+        self.content_text.bind("<Control-Shift-X>", lambda e: self.clear_content_and_clipboard())
         self.content_text.bind("<Button-3>", lambda e: self.show_context_menu(e))
+
+        self.content_text.bind("<KeyPress>", self.invalidate_clear_undo_on_input) # Any key press
+        self.content_text.bind("<<Paste>>", self.invalidate_clear_undo_on_input) # Paste action
+
         self.frame.bind("<Button-3>", lambda e: self.show_context_menu(e))
         self.window.bind("<Button-3>", lambda e: self.show_context_menu(e))
         self.title_label.bind("<Button-3>", lambda e: self.show_context_menu(e))
         self.window.bind("<ButtonPress-1>", self.on_window_press, add='+')
         self.window.bind("<ButtonRelease-1>", self.on_window_release, add='+')
         self.content_text.bind("<MouseWheel>", self.on_mousewheel)
+
+
+
         if sys.platform.startswith('linux'):
             self.content_text.bind("<Button-4>", self.on_mousewheel)
             self.content_text.bind("<Button-5>", self.on_mousewheel)
@@ -589,7 +515,7 @@ class PopupWindow:
         self.line_numbers.pack(side=tk.LEFT, fill=tk.Y)
         self.content_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         # Ensure bindings exist
-        self.content_text.bind("<<Modified>>", lambda e: self.handle_text_modified(), add='+')
+        self.content_text.bind("<<Modified>>", lambda e: self.handle_text_modified_visual(), add='+')
         self.content_text.bind("<Configure>", lambda e: self.update_line_numbers(), add='+')
         self.content_text.bind("<KeyPress>", lambda e: self.content_text.after(1, self.update_line_numbers), add='+')
         self.content_text.bind("<KeyRelease>", lambda e: self.content_text.after(1, self.update_line_numbers), add='+')
@@ -636,12 +562,19 @@ class PopupWindow:
         except Exception as e:
             print(self.lang_strings['update_lines_error'].format(e=e))
 
-
-    def handle_text_modified(self):
+    def handle_text_modified_visual(self):
         # Check if the modification flag is set before updating
         if self.content_text.edit_modified():
+            # If text was modified *after* a clear action AND it wasn't
+            # the programmatic clear itself, invalidate the clear undo state.
+            if self._last_cleared_text and not self._is_programmatic_clear:
+                self._last_cleared_text = None
+
+            # Update line numbers (existing logic)
             self.update_line_numbers()
-            self.content_text.edit_modified(False) # Reset the flag
+
+            # Reset the flag (existing logic)
+            self.content_text.edit_modified(False)
 
     def apply_syntax_highlight(self):
         if not hasattr(self, 'content_text') or not self.window or not self.window.winfo_exists(): return
@@ -798,6 +731,78 @@ class PopupWindow:
         except Exception as e:
             print(self.lang_strings['copy_edited_error'].format(e=e))
 
+    def undo_clear(self, event=None):
+        """Undoes the last clear_content_and_clipboard action."""
+        if self._last_cleared_text is not None:
+            try:
+                restored_text = self._last_cleared_text
+                # Restore text widget content
+                self.content_text.delete("1.0", "end")
+                self.content_text.insert("1.0", restored_text)
+
+                # Restore system clipboard
+                self.app.root.clipboard_clear()
+                self.app.root.clipboard_append(restored_text)
+                self.app.previous_clipboard = restored_text # Update app's internal state
+
+                # Clear the stored text so undo only works once per clear
+                self._last_cleared_text = None
+
+                # Optional: Move cursor to end
+                self.content_text.mark_set(tk.INSERT, "end")
+                self.content_text.see(tk.INSERT)
+
+                # Reset the close timer if the window is not pinned
+                self.reset_close_timer()
+
+                return "break" # Prevent Tkinter's default undo if applicable
+
+            except Exception as e:
+                print(f"Error during undo clear: {e}")
+                # Ensure cleared text state is reset even on error
+                self._last_cleared_text = None
+        # If no text to restore, let the default Tkinter undo work (if any)
+        return None
+
+    def clear_content_and_clipboard(self):
+        """Clears the text content in the popup and the system clipboard."""
+        try:
+            self._last_cleared_text = self.content_text.get("1.0", "end-1c")
+
+            self._is_programmatic_clear = True
+            try:
+
+                # Clear the text widget
+                self.content_text.delete("1.0", "end")
+
+                # Clear the system clipboard (and ensure it's set to empty)
+                self.app.root.clipboard_clear()
+                self.app.root.clipboard_append("") # Explicitly set to empty string
+                self.app.previous_clipboard = "" # Update app's internal state
+            finally:
+                self._is_programmatic_clear = False
+
+            # Update title temporarily
+            current_title = self.title_label.cget('text')
+            # Basic check to avoid appending status multiple times if user spams hotkey
+            base_title = current_title.split(' - ')[0] # Get title before status
+            cleared_status = self.lang_strings['status_cleared']
+            self.title_label.config(text=f"{base_title}{cleared_status}")
+
+            # Revert title after a delay
+            def revert_title(original_title=base_title):
+                try:
+                    if self.window and self.window.winfo_exists():
+                        self.title_label.config(text=original_title)
+                except tk.TclError: pass # Ignore if widget is gone
+            self.window.after(1500, revert_title)
+
+            # Reset the close timer if the window is not pinned
+            self.reset_close_timer()
+
+        except Exception as e:
+            print(self.lang_strings['clear_content_error'].format(e=e))
+
     def update_content(self, text, title=None):
         try:
             if not self.window or not self.window.winfo_exists(): return # Check if window still exists
@@ -834,7 +839,7 @@ class PopupWindow:
 
             # Explicitly trigger modified flag handling for line numbers/highlighting
             self.content_text.edit_modified(True)
-            self.handle_text_modified() # Updates line numbers
+            self.handle_text_modified_visual() # Updates line numbers
 
             # Re-apply highlighting if enabled (Percolator handles incremental updates)
             if self.is_syntax_highlight:
@@ -1095,7 +1100,7 @@ class TextProcessor:
             self.app.root.after(0, self.process_existing_popup_text)
         else:
             # Popup doesn't exist: Show current clipboard or help text in a new popup
-            self.app.root.after(0, self.app._show_clipboard_or_help)
+            self.app.root.after(0, self.app._show_clipboard_content)
 
 class ClipboardApp:
     """剪贴板监控应用的主类"""
@@ -1459,7 +1464,6 @@ class ClipboardApp:
             print(self.lang_strings['tray_setup_error'].format(e=e))
             self.tray_icon = None
 
-
     def exit_application(self):
         """Handles the clean shutdown of the application."""
         if not self.is_running: return
@@ -1513,34 +1517,86 @@ class ClipboardApp:
         finally:
             self.root = None
 
+def show_instance_exists_dialog():
+    """
+    Displays a simple dialog informing the user that another instance is running.
+    This function creates a temporary hidden root window required by messagebox.
+    """
+    # Create a temporary root window, make it invisible
+    temp_root = tk.Tk()
+    temp_root.withdraw()
+    temp_root.attributes("-topmost", True) # Try to bring message box to front
+    # Define title and message
+    title = "Clipboard Helper"
+    message = "Only one instance can be run at a time.\n一次只能运行一个实例。"
+    # Show the warning message box (modal)
+    # The user must click OK to proceed (which will then lead to sys.exit in the calling code)
+    messagebox.showwarning(title, message, parent=temp_root) # Use parent to associate
+    # Clean up the temporary root window
+    try:
+        temp_root.destroy()
+    except tk.TclError:
+        pass # Ignore error if it's already gone
 
 if __name__ == "__main__":
-    # Determine language here *before* creating ClipboardApp instance
-    # to print the final message in the correct language.
+    # --- 单实例检测（使用互斥锁）---
+    try:
+        # 定义互斥锁名称（加上命名空间前缀以避免冲突）
+        mutex_name = "Global\\ClipboardHelper_SingleInstance_Lock"
+
+        # 创建/获取互斥锁
+        mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+        last_error = ctypes.windll.kernel32.GetLastError()
+
+        # 错误码183表示互斥锁已存在（即另一个实例正在运行）
+        if last_error == 183:  # ERROR_ALREADY_EXISTS
+            print("已检测到另一个实例正在运行")
+            show_instance_exists_dialog()
+
+            # 释放互斥锁句柄以避免资源泄漏
+            ctypes.windll.kernel32.CloseHandle(mutex)
+            sys.exit(0)
+
+        print("单实例检测通过，启动应用程序")
+
+    except Exception as e:
+        print(f"互斥锁检测出错: {e}")
+        # 检测失败时仍然继续运行（宁可启动多实例也不要阻止程序运行）
+    # --- 单实例检测结束 ---
+
+    # 确定语言（此代码保持不变）
     app_instance = None
-    final_lang_strings = LANGUAGES['en'] # Default
+    final_lang_strings = LANGUAGES['en']
     try:
         lang_code_full, _ = locale.getlocale()
         if lang_code_full and lang_code_full.lower().startswith('chinese'):
             final_lang_strings = LANGUAGES['zh']
     except Exception:
-        pass # Keep default English
+        pass
 
+    # 启动应用程序
     try:
-        app_instance = ClipboardApp() # App runs its mainloop here
+        app_instance = ClipboardApp()
     except Exception as main_e:
-        # Use the determined language for the final error message
-        print(final_lang_strings['main_error'].format(main_e=main_e))
+        error_msg = final_lang_strings.get('main_error', "应用程序启动或运行时出现严重错误: {main_e}")
+        print(error_msg.format(main_e=main_e))
     finally:
-        # Ensure the final exit message is printed regardless of app state
+        # 确保打印退出消息
+        exit_msg = "应用程序已退出"
         if app_instance and hasattr(app_instance, 'lang_strings'):
-            # Use language from the running app if available
-            print(app_instance.lang_strings['exit_message'])
+            exit_msg = app_instance.lang_strings.get('exit_message', exit_msg)
         else:
-            # Fallback to initially determined language
-            print(final_lang_strings['exit_message'])
+            exit_msg = final_lang_strings.get('exit_message', exit_msg)
+        print(exit_msg)
+
+        # 释放互斥锁句柄（在应用退出时）
+        try:
+            if 'mutex' in locals() and mutex:
+                ctypes.windll.kernel32.CloseHandle(mutex)
+        except:
+            pass
 
 # Compile:
-# python -m nuitka --standalone --mingw64 --windows-console-mode=disable --enable-plugin=tk-inter --plugin-enable=anti-bloat --nofollow-import-to=numpy,pandas,matplotlib,scipy,PyQt5,PySide2,email,http,ssl,html,xml,test,unittest,tkinter.test,idlelib.idle_test --include-package=pynput,pyautogui,darkdetect,pystray --include-module=idlelib.colorizer,idlelib.percolator --include-data-dir=assets=assets --python-flag=-OO --remove-output --lto=yes --onefile ./main.py
+# python -m nuitka --standalone --mingw64 --windows-console-mode=disable --enable-plugin=tk-inter --nofollow-import-to=numpy,pandas,matplotlib,scipy,PyQt5,PySide2,email,http,ssl,html,xml,test,unittest,tkinter.test,idlelib.idle_test --include-package=pynput,pyautogui,darkdetect,pystray --include-module=idlelib.colorizer,idlelib.percolator --include-data-dir=assets=assets --python-flag=-OO --remove-output --lto=yes --onefile ./main.py
 
 # tips: 结合 Win + V 使用，效果更佳
